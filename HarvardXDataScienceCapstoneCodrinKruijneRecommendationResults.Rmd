@@ -9,6 +9,7 @@ output: html_notebook
 ## Seperating out movie year
 
 edx <- edx_original %>% mutate(movie_year = as.numeric(str_sub(title, -5, -2)))
+edx <- edx %>% mutate(title = str_sub(title, 0, -8))
 # Let's make sure these are year numbers with exactly four digits
 all(str_detect(edx$movie_year, "^\\d{4}$"))
 
@@ -20,9 +21,10 @@ unique_genres <- unique(str_extract(edx$genres, "[^\\|]+"))
 edx[, unique_genres] <- NA
 # For each of the ratings we detect present genres
 for(g in 1:length(unique_genres)) {
-  print(paste("Detecting: ", unique_genres[g]))
+  #print(paste("Detecting: ", unique_genres[g]))
   edx[, unique_genres[g]] <- str_detect(edx$genre, unique_genres[g])
 }
+edx <- edx %>% select(-genres)
 
 ```
 
@@ -33,5 +35,7 @@ for(g in 1:length(unique_genres)) {
 ## Timing of ratings
 
 ## Level of ratings
+
+## Degree of rating
 
 ## Genre preferences

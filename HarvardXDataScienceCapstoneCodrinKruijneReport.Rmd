@@ -5,17 +5,19 @@ output:
   pdf_document: default
 ---
 
-# Movie reccomendation: three approaches
+# Movie reccomendation
 
-## Learning goals
+
+
+## Capstone learning goals
+- Recommendation approches
 - Machine Learning
 - AutoML with H2O.ai
 - R recommender package
 
-# Understanding the data
-Each record contains a rating (with )
-
 # Recommendation approaches
+## Collaborative filtering
+## Content-based filtering
 
 ```{r}
 plot(cars)
@@ -37,7 +39,7 @@ plot(cars)
 
 ## Level of ratings
 
-# Degree of rating
+## Degree of rating
 
 ## Genre preferences
 
