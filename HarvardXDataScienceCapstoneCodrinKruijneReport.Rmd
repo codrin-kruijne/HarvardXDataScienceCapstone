@@ -1,0 +1,43 @@
+---
+title: "HarvardX Data Science Capstone"
+author: "Codrin Kruijne"
+output:
+  pdf_document: default
+---
+
+# Movie reccomendation: three approaches
+
+## Learning goals
+- Machine Learning
+- AutoML with H2O.ai
+- R recommender package
+
+# Understanding the data
+Each record contains a rating (with )
+
+# Recommendation approaches
+
+```{r}
+plot(cars)
+```
+
+# Data preparation
+
+## Seperating out genres
+
+## Seperating out year
+
+
+
+# Rater characteristics
+
+## Amount of ratings
+
+## Timing of ratings
+
+## Level of ratings
+
+# Degree of rating
+
+## Genre preferences
+

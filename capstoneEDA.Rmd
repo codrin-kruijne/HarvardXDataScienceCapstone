@@ -1,0 +1,59 @@
+---
+title: "HarvardX Data Science Capstone"
+author: "Codrin Kruijne"
+output: html_notebook
+---
+
+# Exploratory Data Analysis
+```{r}
+str(edx)
+```
+
+# Q1
+```{r}
+nrow(edx)
+length(edx)
+```
+
+# Q2
+```{r}
+sum(edx$rating == 0)
+sum(edx$rating == 3)
+```
+
+# Q3
+```{r}
+length(unique(edx$movieId))
+```
+
+# Q4
+```{r}
+length(unique(edx$userId))
+```
+
+# Q5
+```{r}
+sum(str_detect(edx$genre, "Drama"))
+sum(str_detect(edx$genre, "Comedy"))
+sum(str_detect(edx$genre, "Thriller"))
+sum(str_detect(edx$genre, "Romance"))
+```
+
+# Q6
+```{r}
+library(dplyr)
+edx %>% group_by(title) %>%
+        count(title, sort = TRUE)
+```
+
+# Q7
+```{r}
+edx %>% group_by(rating) %>%
+        count(rating, sort = TRUE)
+```
+
+# Q8
+```{r}
+length(edx$rating[edx$rating %% 1 == 0]) > length(edx$rating[edx$rating %% 1 == 0.5])
+```
+
