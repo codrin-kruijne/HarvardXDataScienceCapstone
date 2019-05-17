@@ -6,7 +6,7 @@ output:
 ---
 
 # Movie reccomendation
-
+http://files.grouplens.org/datasets/movielens/ml-10m-README.html
 
 
 ## Capstone learning goals

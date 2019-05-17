@@ -3,39 +3,176 @@ title: "Movie recommendation results"
 output: html_notebook
 ---
 
-# Data preparation
+# Loading packages and data
 
 ```{r}
-## Seperating out movie year
+# Load required packages
+library(tidyverse)
+library(lubridate)
+library(caret)
+library(doParallel)
 
-edx <- edx_original %>% mutate(movie_year = as.numeric(str_sub(title, -5, -2)))
-edx <- edx %>% mutate(title = str_sub(title, 0, -8))
+# Load locally stored data
+edx_original <- readRDS("edx.RData")
+validation_original <- readRDS("validation.RData")
+```
+
+# Preparing data
+
+```{r}
+# Separating user characteristics, ratings and movie features
+user_data <- edx_original %>% select(userId) %>% unique()
+rating_data <- edx_original %>% select(userId, movieId, rating, timestamp)
+movie_data <- edx_original %>% select(movieId, title, genres) %>% unique()
+
+## Enhancing separated data
+
+# Extract movie year from title
+movie_data <- movie_data %>% mutate(movie_year = as.numeric(str_sub(title, -5, -2)))
 # Let's make sure these are year numbers with exactly four digits
-all(str_detect(edx$movie_year, "^\\d{4}$"))
-
-## Seperating out genres
-
+all(str_detect(movie_data$movie_year, "^\\d{4}$"))
+# Remove year from title
+movie_data <- movie_data %>% mutate(title = str_sub(title, 0, -8))
+# Turn rating timestamps to date
+rating_data <- rating_data %>% mutate(date = as.POSIXct(timestamp, origin = "1970-01-01"))
 # Let's determine which genres we have
-unique_genres <- unique(str_extract(edx$genres, "[^\\|]+"))
+unique_genres <- unique(str_extract(movie_data$genres, "[^\\|]+"))
 # Now lets add them as columns
-edx[, unique_genres] <- NA
+movie_data[, unique_genres] <- NA
 # For each of the ratings we detect present genres
 for(g in 1:length(unique_genres)) {
   #print(paste("Detecting: ", unique_genres[g]))
-  edx[, unique_genres[g]] <- str_detect(edx$genre, unique_genres[g])
+  movie_data[, unique_genres[g]] <- str_detect(movie_data$genres, unique_genres[g])
 }
-edx <- edx %>% select(-genres)
+# Drop old columns
+movie_data <- movie_data %>% select(-genres)
+rating_data <- rating_data %>% select(-timestamp)
+
+# Let's explore our new data sets
+head(user_data)
+head(rating_data)
+head(movie_data)
+```
+
+# User characteristics
+
+```{r}
+## Amount of ratings
+rating_counts <- rating_data %>% group_by(userId) %>% count()
+user_data <- user_data %>% inner_join(rating_counts)
+
+## Ratings statistics
+rating_stats <- rating_data %>% group_by(userId) %>%
+                                mutate(user_min = summary(rating)[1]) %>%
+                                mutate(user_firstq = summary(rating)[2]) %>%
+                                mutate(user_median = summary(rating)[3]) %>%
+                                mutate(user_mean = summary(rating)[4]) %>%
+                                mutate(user_thirdq = summary(rating)[5]) %>%
+                                mutate(user_max = summary(rating)[6]) %>%
+                                select(userId, user_min, user_firstq, user_median, user_mean, user_thirdq, user_max) %>%
+                                unique()
+user_data <- user_data %>% inner_join(rating_stats)
+user_data <- rename(user_data, c("n" = "user_ratings"))
 
 ```
 
-# Rater characteristics
+# Movie characteristics
 
-## Amount of ratings
+```{r}
+# Number of ratings per movie
+movie_ratings <- rating_data %>% group_by(movieId) %>% count()
+movie_data <- movie_data %>% inner_join(movie_ratings)
 
-## Timing of ratings
+# Movie rating statistics
+movie_stats <- rating_data %>% group_by(movieId) %>%
+                               mutate(movie_min = summary(rating)[1]) %>%
+                               mutate(movie_firstq = summary(rating)[2]) %>%
+                               mutate(movie_median = summary(rating)[3]) %>%
+                               mutate(movie_mean = summary(rating)[4]) %>%
+                               mutate(movie_thirdq = summary(rating)[5]) %>%
+                               mutate(movie_max = summary(rating)[6]) %>%
+                               select(movieId, movie_min, movie_firstq, movie_median, movie_mean, movie_thirdq, movie_max) %>%
+                               unique()
 
-## Level of ratings
+movie_data <- movie_data %>% inner_join(movie_stats)
 
-## Degree of rating
+```
 
-## Genre preferences
+# Rating characteristics
+
+```{r}
+
+## Ratings - rating_mean
+rating_mean <- mean(rating_data$rating)
+rating_data <- rating_data %>% mutate(rating_mean_diff = rating_mean - rating) %>%
+                               mutate(movie_mean_diff = movie_mean - rating)
+
+```
+
+
+
+
+# Model training preparation
+```{r}
+
+# RSME loss function function to evaluate models
+RMSE <- function(true_ratings, predicted_ratings){
+     sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+# Create train and test sets
+test_index <- createDataPartition(y = rating_data$rating, times = 1,
+                                  p = 0.2, list = FALSE)
+train_set <- rating_data[-test_index,]
+test_set <- rating_data[test_index,]
+
+# To make sure movies and users are in both train and test sets
+test_set <- test_set %>% 
+     semi_join(train_set, by = "movieId") %>%
+     semi_join(train_set, by = "userId")
+
+```
+
+# Model building
+
+```{r}
+### Building the Recommendation System
+
+# Naive model using average rating
+mu_hat <- mean(train_set$rating)
+mu_hat
+
+naive_rmse <- RMSE(test_set$rating, mu_hat)
+
+rmse_results <- data_frame(method = "Just the average", RMSE = naive_rmse)
+
+# Model using fixed number
+fixed_number <- rep(2.5, nrow(test_set))
+
+fixed_rmse <- RMSE(test_set$rating, fixed_number)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Fixed number 2.5",
+                                     RMSE = fixed_rmse ))
+
+```
+
+# Model tweaking
+
+```{r}
+# Taking into consideration movie effect (rating - movie average)
+movie_means <- movie_data %>% select(movieId, mean)
+
+movie_effect_predictions <- test_set %>% inner_join(movie_means) %>%
+                                         mutate(prediction = mu_hat + rating - mean)
+
+# Using the difference between movie mean and user rating
+
+movie_effect_rmse <- RMSE(test_set$rating, movie_effect_predictions$mean_diff)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie effect",
+                                     RMSE = movie_effect_rmse ))
+
+```
+
