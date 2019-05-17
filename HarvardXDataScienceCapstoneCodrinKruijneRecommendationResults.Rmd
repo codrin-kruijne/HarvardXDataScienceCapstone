@@ -9,8 +9,6 @@ output: html_notebook
 # Load required packages
 library(tidyverse)
 library(lubridate)
-library(caret)
-library(doParallel)
 
 # Load locally stored data
 edx_original <- readRDS("edx.RData")
@@ -24,8 +22,6 @@ validation_original <- readRDS("validation.RData")
 user_data <- edx_original %>% select(userId) %>% unique()
 rating_data <- edx_original %>% select(userId, movieId, rating, timestamp)
 movie_data <- edx_original %>% select(movieId, title, genres) %>% unique()
-
-## Enhancing separated data
 
 # Extract movie year from title
 movie_data <- movie_data %>% mutate(movie_year = as.numeric(str_sub(title, -5, -2)))
@@ -58,21 +54,21 @@ head(movie_data)
 
 ```{r}
 ## Amount of ratings
-rating_counts <- rating_data %>% group_by(userId) %>% count()
-user_data <- user_data %>% inner_join(rating_counts)
+user_ratings <- rating_data %>% add_count(userId, name = "user_ratings") %>%
+                                select(userId, user_ratings) %>% unique()
+user_data <- user_data %>% inner_join(user_ratings)
 
 ## Ratings statistics
 rating_stats <- rating_data %>% group_by(userId) %>%
-                                mutate(user_min = summary(rating)[1]) %>%
-                                mutate(user_firstq = summary(rating)[2]) %>%
-                                mutate(user_median = summary(rating)[3]) %>%
-                                mutate(user_mean = summary(rating)[4]) %>%
-                                mutate(user_thirdq = summary(rating)[5]) %>%
-                                mutate(user_max = summary(rating)[6]) %>%
+                                summarise(user_min = summary(rating)[1],
+                                          user_firstq = summary(rating)[2],
+                                          user_median = summary(rating)[3],
+                                          user_mean = summary(rating)[4],
+                                          user_thirdq = summary(rating)[5],
+                                          user_max = summary(rating)[6]) %>%
                                 select(userId, user_min, user_firstq, user_median, user_mean, user_thirdq, user_max) %>%
                                 unique()
 user_data <- user_data %>% inner_join(rating_stats)
-user_data <- rename(user_data, c("n" = "user_ratings"))
 
 ```
 
@@ -80,17 +76,18 @@ user_data <- rename(user_data, c("n" = "user_ratings"))
 
 ```{r}
 # Number of ratings per movie
-movie_ratings <- rating_data %>% group_by(movieId) %>% count()
+movie_ratings <- rating_data %>% add_count(movieId, name = "movie_ratings") %>%
+                                 select(movieId, movie_ratings) %>% unique()
 movie_data <- movie_data %>% inner_join(movie_ratings)
 
 # Movie rating statistics
 movie_stats <- rating_data %>% group_by(movieId) %>%
-                               mutate(movie_min = summary(rating)[1]) %>%
-                               mutate(movie_firstq = summary(rating)[2]) %>%
-                               mutate(movie_median = summary(rating)[3]) %>%
-                               mutate(movie_mean = summary(rating)[4]) %>%
-                               mutate(movie_thirdq = summary(rating)[5]) %>%
-                               mutate(movie_max = summary(rating)[6]) %>%
+                               summarise(movie_min = summary(rating)[1],
+                                         movie_firstq = summary(rating)[2],
+                                         movie_median = summary(rating)[3],
+                                         movie_mean = summary(rating)[4],
+                                         movie_thirdq = summary(rating)[5],
+                                         movie_max = summary(rating)[6]) %>%
                                select(movieId, movie_min, movie_firstq, movie_median, movie_mean, movie_thirdq, movie_max) %>%
                                unique()
 
@@ -104,13 +101,11 @@ movie_data <- movie_data %>% inner_join(movie_stats)
 
 ## Ratings - rating_mean
 rating_mean <- mean(rating_data$rating)
-rating_data <- rating_data %>% mutate(rating_mean_diff = rating_mean - rating) %>%
+rating_data <- rating_data %>% mutate(rating_mean_diff = rating_mean - rating)
+rating_data <- rating_data %>% inner_join(movie_data[, c("movieId", "movie_mean")]) %>%
                                mutate(movie_mean_diff = movie_mean - rating)
 
 ```
-
-
-
 
 # Model training preparation
 ```{r}
@@ -174,5 +169,10 @@ rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Movie effect",
                                      RMSE = movie_effect_rmse ))
 
+```
+
+```{r}
+library(caret)
+library(doParallel)
 ```
 
