@@ -59,17 +59,14 @@ user_ratings <- rating_data %>% add_count(userId, name = "user_ratings") %>%
 user_data <- user_data %>% inner_join(user_ratings)
 
 ## Ratings statistics
-rating_stats <- rating_data %>% group_by(userId) %>%
-                                summarise(user_min = summary(rating)[1],
-                                          user_firstq = summary(rating)[2],
-                                          user_median = summary(rating)[3],
-                                          user_mean = summary(rating)[4],
-                                          user_thirdq = summary(rating)[5],
-                                          user_max = summary(rating)[6]) %>%
-                                select(userId, user_min, user_firstq, user_median, user_mean, user_thirdq, user_max) %>%
+user_stats <- rating_data %>% group_by(userId) %>%
+                                summarise(user_median = median(rating),
+                                          user_mean = mean(rating),
+                                          user_sd = sd(rating)) %>%
+                                select(userId, user_median, user_mean, user_sd) %>%
                                 unique()
-user_data <- user_data %>% inner_join(rating_stats)
-
+user_data <- user_data %>% inner_join(user_stats)
+user_data$userId <- as.factor(user_data$userId)
 ```
 
 # Movie characteristics
@@ -82,33 +79,38 @@ movie_data <- movie_data %>% inner_join(movie_ratings)
 
 # Movie rating statistics
 movie_stats <- rating_data %>% group_by(movieId) %>%
-                               summarise(movie_min = summary(rating)[1],
-                                         movie_firstq = summary(rating)[2],
-                                         movie_median = summary(rating)[3],
-                                         movie_mean = summary(rating)[4],
-                                         movie_thirdq = summary(rating)[5],
-                                         movie_max = summary(rating)[6]) %>%
-                               select(movieId, movie_min, movie_firstq, movie_median, movie_mean, movie_thirdq, movie_max) %>%
+                               summarise(movie_median = median(rating),
+                                         movie_mean = mean(rating),
+                                         movie_sd = sd(rating)) %>%
+                               select(movieId, movie_median, movie_mean, movie_sd) %>%
                                unique()
 
 movie_data <- movie_data %>% inner_join(movie_stats)
-
+movie_data$movieId <- as.factor(movie_data$movieId)
 ```
 
 # Rating characteristics
 
 ```{r}
 
+### CALCULATION OF rating_mean_diff should be inversed, but does not make sense to me ... ###
+
 ## Ratings - rating_mean
 rating_mean <- mean(rating_data$rating)
-rating_data <- rating_data %>% mutate(rating_mean_diff = rating_mean - rating)
+rating_data <- rating_data %>% mutate(rating_mean_diff = rating - rating_mean)
 rating_data <- rating_data %>% inner_join(movie_data[, c("movieId", "movie_mean")]) %>%
-                               mutate(movie_mean_diff = movie_mean - rating)
+                               mutate(movie_mean_diff = rating - movie_mean)
+rating_data$userId <- as.factor(rating_data$userId)
+rating_data$movieId <- as.factor(rating_data$movieId)
 
+# Let's simplify the rating date to year
+rating_data$rating_year <- year(rating_data$date)
+rating_data$date <- NULL
 ```
 
 # Model training preparation
 ```{r}
+library(caret)
 
 # RSME loss function function to evaluate models
 RMSE <- function(true_ratings, predicted_ratings){
@@ -134,12 +136,12 @@ test_set <- test_set %>%
 ### Building the Recommendation System
 
 # Naive model using average rating
-mu_hat <- mean(train_set$rating)
-mu_hat
+rating_mean <- mean(train_set$rating)
+rating_mean
 
-naive_rmse <- RMSE(test_set$rating, mu_hat)
+naive_rmse <- RMSE(test_set$rating, rating_mean)
 
-rmse_results <- data_frame(method = "Just the average", RMSE = naive_rmse)
+rmse_results <- data_frame(method = "Average rating", RMSE = naive_rmse)
 
 # Model using fixed number
 fixed_number <- rep(2.5, nrow(test_set))
@@ -150,29 +152,158 @@ rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Fixed number 2.5",
                                      RMSE = fixed_rmse ))
 
+rmse_results
 ```
 
 # Model tweaking
 
 ```{r}
-# Taking into consideration movie effect (rating - movie average)
-movie_means <- movie_data %>% select(movieId, mean)
+# Taking into consideration rating effect; calculing the average per movie of the difference between each rating and the average overall rating
+rating_effect_training <- train_set %>% group_by(movieId) %>%
+                                           summarise(rating_mean_diff_avg = rating_mean - mean(rating_mean_diff))
 
-movie_effect_predictions <- test_set %>% inner_join(movie_means) %>%
-                                         mutate(prediction = mu_hat + rating - mean)
+# Apply predictions to the test set
+rating_effect_predictions <- test_set %>% inner_join(rating_effect_training)
 
 # Using the difference between movie mean and user rating
 
-movie_effect_rmse <- RMSE(test_set$rating, movie_effect_predictions$mean_diff)
+rating_effect_rmse <- RMSE(test_set$rating, rating_effect_predictions$rating_mean_diff_avg)
+
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Rating effect",
+                                     RMSE = rating_effect_rmse ))
+
+# Taking into consideration movie effect; calculing the average per movie of the difference between each rating and the movie average rating
+movie_effect_training <- train_set %>% group_by(movieId) %>%
+                                       summarise(movie_mean_diff_avg = mean(movie_mean_diff))
+
+# Apply predictions to the test set
+movie_effect_predictions <- test_set %>% inner_join(movie_effect_training)
+
+# Using the difference between movie mean and user rating
+
+movie_effect_rmse <- RMSE(test_set$rating, movie_effect_predictions$movie_mean_diff_avg)
 
 rmse_results <- bind_rows(rmse_results,
                           data_frame(method="Movie effect",
                                      RMSE = movie_effect_rmse ))
 
+rmse_results
+
+## Something's off with my thinking here ;-)
+
 ```
 
 ```{r}
-library(caret)
+
+# Let's merged derived data
+
+train_set_plus <- train_set %>% left_join(user_data, by = "userId") %>%
+                                left_join(movie_data, by = "movieId")
+train_set_plus$userId <- as.factor(train_set_plus$userId)
+train_set_plus$movieId <- as.factor(train_set_plus$movieId)
+train_set_plus$movie_year <- as.factor(train_set_plus$movie_year)
+
+# Create test_set_plus
+test_set_plus <- test_set %>% left_join(user_data, by = "userId") %>%
+                              left_join(movie_data, by = "movieId")
+test_set_plus$userId <- as.factor(test_set_plus$userId)
+test_set_plus$movieId <- as.factor(test_set_plus$movieId)
+test_set_plus$movie_year <- as.factor(test_set_plus$movie_year)
+```
+
+# Train mode models
+```{r}
+
+# Let's prepare parallel processing
 library(doParallel)
+cl <- makePSOCKcluster(5)
+registerDoParallel(cl)
+
+## Model training in parallel
+
+tc <- trainControl(number = 10)
+
+system.time({
+  model_1 <- train(rating ~ movieId,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_1$finalModel
+
+system.time({
+  model_2 <- train(rating ~ movieId + userId,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_2$finalModel
+
+system.time({
+  model_3 <- train(rating ~ movieId + userId + movie_mean.x,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_3$finalModel
+
+## Does it matter what the movies are? Maybe focus on the ratings
+
+system.time({
+  model_4 <- train(rating ~ movie_mean.x,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_4$finalModel
+
+system.time({
+  model_5 <- train(rating ~ movie_mean.x + user_mean,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_5$finalModel
+
+system.time({
+  model_6 <- train(rating ~ movie_mean.x + movie_sd + user_mean + user_sd,
+                   data = train_set_plus, method = "lm", 
+                   na.action = na.omit, metric = "RMSE",
+                   trainControl = tc)
+})
+model_6$finalModel
+
+# Lets add some more characteristics
+
+## Stopping clusters
+stopCluster(cl)
+
+```
+
+# Prediction and results
+```{r}
+
+# Predict on test_set
+model_1_predictions <- predict(model_1, newdata = test_set_plus)
+model_2_predictions <- predict(model_2, newdata = test_set_plus)
+model_3_predictions <- predict(model_3, newdata = test_set_plus)
+model_4_predictions <- predict(model_4, newdata = test_set_plus)
+model_5_predictions <- predict(model_5, newdata = test_set_plus)
+model_6_predictions <- predict(model_6, newdata = test_set_plus)
+
+# Print results on test set
+
+print(paste("Model 1 RMSE in test set: ", RMSE(test_set_plus$rating, model_1_predictions)))
+print(paste("Model 2 RMSE in test set: ", RMSE(test_set_plus$rating, model_2_predictions)))
+print(paste("Model 3 RMSE in test set: ", RMSE(test_set_plus$rating, model_3_predictions)))
+print(paste("Model 4 RMSE in test set: ", RMSE(test_set_plus$rating, model_4_predictions)))
+print(paste("Model 5 RMSE in test set: ", RMSE(test_set_plus$rating, model_5_predictions)))
+print(paste("Model 6 RMSE in test set: ", RMSE(test_set_plus$rating, model_6_predictions)))
+
+# Verify results on validation set
+
+
+  
 ```
 
