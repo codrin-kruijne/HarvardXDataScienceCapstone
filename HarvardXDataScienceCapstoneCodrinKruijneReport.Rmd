@@ -1,45 +1,30 @@
 ---
 title: "HarvardX Data Science Capstone"
 author: "Codrin Kruijne"
+date: "22/05/2019"
 output:
   pdf_document: default
 ---
 
-# Movie reccomendation
-http://files.grouplens.org/datasets/movielens/ml-10m-README.html
+This report has been prepared for the [HarvardX Data Science program] ](https://www.edx.org/professional-certificate/harvardx-data-science) Capstone course final project submission and consists of three files of original work that can be found on GitHub (with all commits): this [report in PDF](), this [report in R markdown] and an [R markdown script file]() with all the code (also [knitted to PDF with results]() for convenience). Next to the course requirements my learning goal was to get familir with parallel processing and explore using [AutoML](http://docs.h2o.ai/h2o/latest-stable/h2o-docs/automl.html) with [H2O in R](https://cran.r-project.org/package=h2o).
 
 
-## Capstone learning goals
-- Recommendation approches
-- Machine Learning
-- AutoML with H2O.ai
-- R recommender package
+# Introduction
 
-# Recommendation approaches
-## Collaborative filtering
-## Content-based filtering
+The dataset consists of 10M movie ratings by users, including some movie information like genre. The goal of the assignment was to devise a way to predict movie ratings. I generated predictions derived from user and movie characteristics, using linear regression and applying AutoML. Model performances was assessed using RMSE and deri
 
-```{r}
-plot(cars)
-```
+# Analysis
 
-# Data preparation
+## Data preparation
 
-## Seperating out genres
+## Data exploration
+visualization, any insights gained
 
-## Seperating out year
+## Modeling
+approach and results
 
 
+# Conclusion
 
-# Rater characteristics
 
-## Amount of ratings
-
-## Timing of ratings
-
-## Level of ratings
-
-## Degree of rating
-
-## Genre preferences
 
