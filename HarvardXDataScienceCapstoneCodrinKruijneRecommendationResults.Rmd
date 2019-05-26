@@ -50,15 +50,11 @@ all_data <- setNames(list(train_data, test_data), c("train_data", "test_data"))
 
 # Let's prepare parallel processing
 library(parallel)
-no_cores <- detectCores() - 2
+no_cores <- detectCores() - 4
 pcl <- makeCluster(no_cores)
 clusterEvalQ(pcl, library(dplyr))
 clusterEvalQ(pcl, library(lubridate))
 clusterEvalQ(pcl, library(stringr))
-
-```
-
-```{r}
 
 # Some basic data transformation is done to both training and test data
 
@@ -324,34 +320,37 @@ train_lm <- function(lm_formula, lm_data){
              }, error = function(e) e, finally = print("Made it!"))
   }))
   
+  # Full train objects are GBs large; save only the final model coefficients
+  model_coef <- model$finalModel$coefficients
+  
   # How's our memory?
   print(paste("Memory size before garbage collection: ", memory.size()))
   gc()
   print(paste("Memory size after garbage collection: ", memory.size()))
   
   # Save model locally
-  saveRDS(model, paste0("models/", lm_formula, ".rds"))
+  saveRDS(model_coef, paste0("models/", lm_formula, ".rds"))
   # Return results
-  print(model$finalModel)
+  print(model_coef)
   model
 }
 
 # Train and save locally
 user_fits <- parLapply(tcl, user_formulas, train_lm, lm_data = train_ratings)
-saveRDS(user_fits, "user_fits.rds")
+#saveRDS(user_fits, "user_fits.rds")
 rm(user_fits)
 
 movie_fits <- parLapply(tcl, movie_formulas, train_lm, lm_data = train_ratings)
-saveRDS(movie_fits, "movie_fits.rds")
+#saveRDS(movie_fits, "movie_fits.rds")
 rm(movie_fits)
 
 combined_fits <- parLapply(tcl, combined_formulas, train_lm, lm_data = train_ratings)
-saveRDS(combined_fits, "combined_fits.rds")
+#saveRDS(combined_fits, "combined_fits.rds")
 rm(combined_fits)
 
-combined_fits <- parLapply(tcl, full_formulas, train_lm, lm_data = train_ratings)
-saveRDS(combined_fits, "full_fits.rds")
-rm(combined_fits)
+full_fits <- parLapply(tcl, full_formulas, train_lm, lm_data = train_ratings)
+#saveRDS(full_fits, "full_fits.rds")
+rm(full_fits)
 
 # Stop parallel processing
 stopImplicitCluster()
@@ -361,52 +360,57 @@ gc()
 
 ```
 
-# Model prediction and results
+# Final model predictions and results
 ```{r}
 
-# Prepare parallel processing
-rcl <- makeCluster(no_cores)
-clusterEvalQ(rcl, library(dplyr))
+# Read model coeffecients and calculate RMSE
 
-# Predict on test_set
-user_fits <- readRDS("user_fits.rds")
-user_predictions <- parLapply(rcl, user_fits, predict, newdata = test_ratings)
-rm(user_fits)
-gc()
+calculate_results <- function(model_formulas, test_ratings){
+  str(test_ratings)
+  
+  for(m in 1:length(model_formulas)){
+    
+    print("Current model: ")
+    print(model_formulas[[m]])
+    
+    coefs <- readRDS(paste0("models/", user_formulas[[m]], ".rds"))
+    print("Coefficients read: ")
+    print(coefs)
+    
+    prediction <- rep(coefs[[1]], nrow(test_ratings)) # start with the intercept
+    print("Prediction (intercept): ")
+    str(prediction)
+    
+    for(c in 2:length(coefs)){ # then go through each coefficient
+      print("Current coefficient: ")
+      print(coefs[c])
+      
+      ce <- rep(coefs[[c]], nrow(test_ratings))
+      str(ce)
+      
+      print(paste("Column name: ", names(coefs[c])))
+      str(test_ratings[, names(coefs[c])])
+      
+      prediction <- prediction + (ce * test_ratings[, names(coefs[c])]) # and add coef * value to prediction
+      
+    }
+    
+    print("Final prediction: ")
+    str(prediction)
+    str(test_ratings$rating)
+    
+    RMSE <- function(predicted_ratings, true_ratings){
+     sqrt(mean((true_ratings - predicted_ratings)^2))
+    }
 
-movie_fits <- readRDS("movie_fits.rds")
-movie_predictions <- parLapply(rcl, movie_fits, predict, newdata = test_ratings)
-rm(movie_fits)
-gc()
+    model_rmse <- RMSE(prediction, test_ratings$rating)
+    
+    print(paste(model_formulas[[m]], model_rmse))
+  }
 
-combined_fits <- readRDS("combined_fits.rds")
-combined_predictions <- parLapply(rcl, combined_fits, predict, newdata = test_ratings)
-rm(combined_fits)
-gc()
+}
 
-full_fits <- readRDS("full_fits.rds")
-full_predictions <- parLapply(rcl, full_fits, predict, newdata = test_ratings)
-rm(full_fits)
-gc()
-
-# Stop parallel processing
-stopCluster(rcl)
-
-# Calculate results
-user_results <- lapply(user_predictions, RMSE, true_ratings = test_ratings$rating)
-movie_results <- lapply(movie_predictions, RMSE, true_ratings = test_ratings$rating)
-combined_results <- lapply(combined_predictions, RMSE, true_ratings = test_ratings$rating)
-full_results <- lapply(full_predictions, RMSE, true_ratings = test_ratings$rating)
-
-# Merge results
-lm_results <- data.frame(model = c(user_formulas,
-                                   movie_formulas,
-                                   combined_formulas,
-                                   full_formulas),
-                         rmse = c(unlist(user_results),
-                                  unlist(movie_results),
-                                  unlist(combined_results),
-                                  unlist(full_results)))
+user_results <- calculate_results(user_formulas, test_ratings)
 
 # Save results locally and print
 saveRDS(lm_results, "lm_results.rds")
