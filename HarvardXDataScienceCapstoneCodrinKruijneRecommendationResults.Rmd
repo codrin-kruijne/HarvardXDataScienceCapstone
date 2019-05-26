@@ -1,13 +1,23 @@
 ---
-title: "Movie recommendation results"
+title: "Movie recommendation script"
+author: "Codrin Kruijne"
 output:
   pdf_document: default
   html_notebook: default
 ---
 
 ```{r setup, include = FALSE}
+# PLEASE NOTE THIS SCRIPT HAS ONLY BEEN TESTED ON A 6-CORE, 64GB MEMORY MACHINE AND WILL PROBABLY NOT RUN WITH LOWER COMPUTER SPECIFICATIONS.
+parallel::detectCores()
+memory.limit()
+
+# Script settings
 knitr::opts_chunk$set(cache = TRUE)
 script_start <- Sys.time()
+
+# Load required packages
+library(tidyverse)
+library(lubridate)
 ```
 
 # Loading packages and data
@@ -15,9 +25,7 @@ script_start <- Sys.time()
 The [dataset](http://files.grouplens.org/datasets/movielens/ml-10m.zip) was downloaded from the [GroupLens website](https://grouplens.org) using the course provided script and stored locally. Information about the data was found on the [MovieLens README] (http://files.grouplens.org/datasets/movielens/ml-10m-README.html)
 
 ```{r}
-# Load required packages
-library(tidyverse)
-library(lubridate)
+
 
 # Load locally stored data
 edx_original <- readRDS("edx.RData")
@@ -38,7 +46,7 @@ all_data <- setNames(list(train_data, test_data), c("train_data", "test_data"))
 
 # Preparing data
 
-```{r include = FALSE}
+```{r include=FALSE, results='hide'}
 
 # Let's prepare parallel processing
 library(parallel)
@@ -167,6 +175,7 @@ calc_rating_stats <- function(rating_data){
 }
 
 rating_data <- parLapply(pcl, rating_data, calc_rating_stats)
+stopCluster(pcl)
 
 ```
 
@@ -175,6 +184,9 @@ rating_data <- parLapply(pcl, rating_data, calc_rating_stats)
 
 train_ratings <- rating_data[[1]]
 test_ratings <- rating_data[[2]]
+
+saveRDS(train_ratings, "train_ratings.rds")
+saveRDS(test_ratings, "test_ratings.rds")
 
 # RSME loss function function to evaluate models
 RMSE <- function(predicted_ratings, true_ratings){
@@ -232,7 +244,7 @@ derived_results <- bind_rows(derived_results,
                              tibble(method = "Rating effect",
                                     RMSE = rating_effect_rmse))
 derived_results <- bind_rows(derived_results,
-                             tibbel(method = "Movie mean",
+                             tibble(method = "Movie mean",
                                     RMSE = movie_mean_rmse))
 derived_results <- bind_rows(derived_results,
                              tibble(method = "Movie effect",
@@ -244,16 +256,19 @@ derived_results <- bind_rows(derived_results,
                              tibble(method = "User-movie effect",
                                     RMSE = user_movie_effect_rmse))
 
-saveRDS(derived_results, "derived_results.RData")
+saveRDS(derived_results, "derived_results.rds")
 print(derived_results)
-
-stopCluster(pcl)
 
 ```
 
 
 # Train linear models
 ```{r}
+
+# Load locally stored data
+train_ratings <- readRDS("train_ratings.rds")
+test_ratings <- readRDS("test_ratings.rds")
+
 # Free up memory
 rm(edx_original,
    validation_original,
@@ -267,30 +282,31 @@ rm(edx_original,
    der_pred)
 gc() # garbage collection
 
-library(caret)
-
 # Set up parallel processing
 library(doParallel)
 no_cores <- detectCores() - 2
 tcl <- makePSOCKcluster(no_cores)
 registerDoParallel(tcl)
+clusterEvalQ(tcl, library(caret))
+
 print(paste("Memory size before garbage collection: ", memory.size()))
 gc()
 print(paste("Memory size after garbage collection: ", memory.size()))
 
 ## Define models
-model_formulas <- c("rating ~ movie_median",
-                    "rating ~ movie_median + movie_mean",
-                    "rating ~ movie_median + movie_mean + movie_sd",
-                    "rating ~ user_median",
-                    "rating ~ user_median + user_mean",
-                    "rating ~ user_median + user_mean + user_sd",
-                    # Let's combine movie and user characteristics
-                    "rating ~ movie_mean + user_mean",
-                    "rating ~ movie_median + user_median",
-                    "rating ~ movie_median + movie_mean + user_median + user_mean",
-                    
-                    "rating ~ movie_median + movie_mean + movie_sd + user_median + user_mean + user_sd")
+user_formulas <- c("rating ~ user_median",
+                   "rating ~ user_median + user_mean",
+                   "rating ~ user_median + user_mean + user_sd")
+
+movie_formulas <- c("rating ~ movie_median",
+                   "rating ~ movie_median + movie_mean",
+                   "rating ~ movie_median + movie_mean + movie_sd")
+
+combined_formulas <- c("rating ~ movie_mean + user_mean",
+                       "rating ~ movie_median + user_median")
+
+full_formulas <- c("rating ~ movie_median + movie_mean + user_median + user_mean",
+                   "rating ~ movie_median + movie_mean + movie_sd + user_median + user_mean + user_sd")
 
 ## Model training
 
@@ -313,51 +329,95 @@ train_lm <- function(lm_formula, lm_data){
   gc()
   print(paste("Memory size after garbage collection: ", memory.size()))
   
+  # Save model locally
+  saveRDS(model, paste0("models/", lm_formula, ".rds"))
   # Return results
   print(model$finalModel)
   model
 }
 
-# Alternatively try(train_lm)
-model_fits <- lapply(model_formulas, train_lm, lm_data = train_ratings)
+# Train and save locally
+user_fits <- parLapply(tcl, user_formulas, train_lm, lm_data = train_ratings)
+saveRDS(user_fits, "user_fits.rds")
+rm(user_fits)
+
+movie_fits <- parLapply(tcl, movie_formulas, train_lm, lm_data = train_ratings)
+saveRDS(movie_fits, "movie_fits.rds")
+rm(movie_fits)
+
+combined_fits <- parLapply(tcl, combined_formulas, train_lm, lm_data = train_ratings)
+saveRDS(combined_fits, "combined_fits.rds")
+rm(combined_fits)
+
+combined_fits <- parLapply(tcl, full_formulas, train_lm, lm_data = train_ratings)
+saveRDS(combined_fits, "full_fits.rds")
+rm(combined_fits)
 
 # Stop parallel processing
-stopCluster(tcl)
+stopImplicitCluster()
 
-# Save locally
-saveRDS(model_fits, "model_fits.RData")
-  
+# Clean up before next step
+gc()
+
 ```
 
 # Model prediction and results
 ```{r}
-# Read stored models
-# model_fits <- readRDS("model_fits.RData")
 
+# Prepare parallel processing
 rcl <- makeCluster(no_cores)
 clusterEvalQ(rcl, library(dplyr))
 
 # Predict on test_set
-system.time({
-  model_predictions <- parLapply(rcl, model_fits, try(predict), newdata = test_ratings)  
-})
+user_fits <- readRDS("user_fits.rds")
+user_predictions <- parLapply(rcl, user_fits, predict, newdata = test_ratings)
+rm(user_fits)
+gc()
 
-# Print results on test set
+movie_fits <- readRDS("movie_fits.rds")
+movie_predictions <- parLapply(rcl, movie_fits, predict, newdata = test_ratings)
+rm(movie_fits)
+gc()
 
-model_results <- parLapply(rcl, model_predictions, RMSE, true_ratings = test_ratings$rating)
+combined_fits <- readRDS("combined_fits.rds")
+combined_predictions <- parLapply(rcl, combined_fits, predict, newdata = test_ratings)
+rm(combined_fits)
+gc()
 
-lm_results <- data.frame(model = model_formulas, rmse = unlist(model_results))
+full_fits <- readRDS("full_fits.rds")
+full_predictions <- parLapply(rcl, full_fits, predict, newdata = test_ratings)
+rm(full_fits)
+gc()
 
-saveRDS(lm_results, "lm_results.RData")
-print(lm_results %>% arrange(rmse))
-
+# Stop parallel processing
 stopCluster(rcl)
 
-rm(model_fits) # Remove models to free up memory
-gc() # Garbage collection
+# Calculate results
+user_results <- lapply(user_predictions, RMSE, true_ratings = test_ratings$rating)
+movie_results <- lapply(movie_predictions, RMSE, true_ratings = test_ratings$rating)
+combined_results <- lapply(combined_predictions, RMSE, true_ratings = test_ratings$rating)
+full_results <- lapply(full_predictions, RMSE, true_ratings = test_ratings$rating)
+
+# Merge results
+lm_results <- data.frame(model = c(user_formulas,
+                                   movie_formulas,
+                                   combined_formulas,
+                                   full_formulas),
+                         rmse = c(unlist(user_results),
+                                  unlist(movie_results),
+                                  unlist(combined_results),
+                                  unlist(full_results)))
+
+# Save results locally and print
+saveRDS(lm_results, "lm_results.rds")
+print(lm_results %>% arrange(rmse))
+
+# Clean up before next step
+gc()
 
 ```
 
+# Automatic Machine Learning with H2O.ai
 ```{r}
 
 # Shall we explore auto ML?
@@ -385,7 +445,7 @@ aml <- h2o.automl(x = x, y = y,
 lb <- aml@leaderboard
 autoML_results <- as.data.frame(lb) %>% select(model_id, rmse)
 
-saveRDS(autoML_results, "autoML_results.RData")
+saveRDS(autoML_results, "autoML_results.rds")
 print(autoML_result)
       
 ```
