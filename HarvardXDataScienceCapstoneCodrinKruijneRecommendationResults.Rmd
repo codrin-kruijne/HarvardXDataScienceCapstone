@@ -1,39 +1,46 @@
 ---
-title: "Movie recommendation script"
+title: "HarvardX Data Science Capstone Movie recommendation script"
 author: "Codrin Kruijne"
+date: "30/5/2019"
 output:
   pdf_document: default
   html_notebook: default
 ---
 
-```{r setup, include = FALSE}
-# PLEASE NOTE THIS SCRIPT HAS ONLY BEEN TESTED ON A 6-CORE, 64GB MEMORY MACHINE AND WILL PROBABLY NOT RUN WITH LOWER COMPUTER SPECIFICATIONS.
+```{r setup}
+# PLEASE NOTE
+# THIS SCRIPT HAS ONLY BEEN TESTED ON A 6-CORE (12-THREAD), 64GB MEMORY MACHINE
+# AND WILL PROBABLY NOT RUN WITH LOWER COMPUTER SPECIFICATIONS.
 parallel::detectCores()
 memory.limit()
 
 # Script settings
-knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(
+	message = FALSE,
+	warning = FALSE,
+	cache = TRUE
+)
 script_start <- Sys.time()
 
 # Load required packages
 library(tidyverse)
 library(lubridate)
+library(parallel)
+library(doParallel)
 ```
 
 # Loading packages and data
 
 The [dataset](http://files.grouplens.org/datasets/movielens/ml-10m.zip) was downloaded from the [GroupLens website](https://grouplens.org) using the course provided script and stored locally. Information about the data was found on the [MovieLens README] (http://files.grouplens.org/datasets/movielens/ml-10m-README.html)
 
-```{r}
-
-
+```{r Data Exploration}
 # Load locally stored data
 edx_original <- readRDS("edx.RData")
 print(str(edx_original))
 validation_original <- readRDS("validation.RData")
 print(str(validation_original))
 
-# Make sure movies and users are in both train and test sets ### USERS DIFFER
+# Make sure movies and users are in both train and test sets
 train_data <- edx_original
 print(str(train_data))
 test_data <- validation_original %>% 
@@ -42,19 +49,23 @@ test_data <- validation_original %>%
 print(str(test_data))
 
 all_data <- setNames(list(train_data, test_data), c("train_data", "test_data"))
+
+# Let's have a quick look at the rating training data
+rating_hist <- hist(train_data$rating)
+saveRDS(rating_hist, "rating_hist.rds")
+rating_hist
 ```
 
 # Preparing data
 
-```{r include=FALSE, results='hide'}
+```{r Data Preparation, include = FALSE, results = 'hide'}
 
 # Let's prepare parallel processing
-library(parallel)
 no_cores <- detectCores() - 4
 pcl <- makeCluster(no_cores)
-clusterEvalQ(pcl, library(dplyr))
-clusterEvalQ(pcl, library(lubridate))
-clusterEvalQ(pcl, library(stringr))
+invisible(clusterEvalQ(pcl, library(dplyr)))
+invisible(clusterEvalQ(pcl, library(lubridate)))
+invisible(clusterEvalQ(pcl, library(stringr)))
 
 # Some basic data transformation is done to both training and test data
 
@@ -94,7 +105,7 @@ extract_movie_data <- function(original_data){
   for(g in 1:length(unique_genres)) {
     movie_data[, unique_genres[g]] <- str_detect(movie_data$genres, unique_genres[g])
   }
-  # Drop old columns
+  # Drop old column
   movie_data <- movie_data %>% select(-genres)
   
 }
@@ -107,13 +118,15 @@ movie_data <- parLapply(pcl, all_data, extract_movie_data)
 # Let's explore our new data sets
 str(user_data)
 str(rating_data)
-str(movie_data) ### NO GENRES LISTED
+str(movie_data)
 ```
 
 # Calculating statistics
 
-```{r}
-## User statistics
+```{r Data Statistics}
+# For all data entities we calculate some basic statistics
+
+# User statistics
 calc_user_stats <- function(rating_data){
   
   rating_data %>% group_by(userId) %>%
@@ -176,15 +189,16 @@ stopCluster(pcl)
 ```
 
 # Derived models
-```{r}
+```{r Derived Models}
 
+# Let's take the rating data with the added statistics
 train_ratings <- rating_data[[1]]
 test_ratings <- rating_data[[2]]
 
 saveRDS(train_ratings, "train_ratings.rds")
 saveRDS(test_ratings, "test_ratings.rds")
 
-# RSME loss function function to evaluate models
+# RSME loss function function to evaluate models as prescribed by assignment
 RMSE <- function(predicted_ratings, true_ratings){
      sqrt(mean((true_ratings - predicted_ratings)^2))
 }
@@ -200,7 +214,7 @@ naive_rmse <- RMSE(test_ratings$rating, train_mean)
 derived_results <- tibble(method = "Average training rating", RMSE = naive_rmse)
 
 # Model using fixed number
-fixed_number <- rep(2.5, nrow(test_ratings))
+fixed_number <- rep(3, nrow(test_ratings))
 
 fixed_rmse <- RMSE(test_ratings$rating, fixed_number)
 
@@ -253,13 +267,13 @@ derived_results <- bind_rows(derived_results,
                                     RMSE = user_movie_effect_rmse))
 
 saveRDS(derived_results, "derived_results.rds")
-print(derived_results)
+print(derived_results %>% arrange(RMSE))
 
 ```
 
 
 # Train linear models
-```{r}
+```{r Linear Model Training}
 
 # Load locally stored data
 train_ratings <- readRDS("train_ratings.rds")
@@ -276,20 +290,19 @@ rm(edx_original,
    rating_data,
    merge_data,
    der_pred)
-gc() # garbage collection
+invisible(gc()) # garbage collection
 
 # Set up parallel processing
-library(doParallel)
 no_cores <- detectCores() - 2
 tcl <- makePSOCKcluster(no_cores)
 registerDoParallel(tcl)
-clusterEvalQ(tcl, library(caret))
+invisible(clusterEvalQ(tcl, library(caret)))
 
 print(paste("Memory size before garbage collection: ", memory.size()))
 gc()
 print(paste("Memory size after garbage collection: ", memory.size()))
 
-## Define models
+# Define models
 user_formulas <- c("rating ~ user_median",
                    "rating ~ user_median + user_mean",
                    "rating ~ user_median + user_mean + user_sd")
@@ -304,8 +317,7 @@ combined_formulas <- c("rating ~ movie_mean + user_mean",
 full_formulas <- c("rating ~ movie_median + movie_mean + user_median + user_mean",
                    "rating ~ movie_median + movie_mean + movie_sd + user_median + user_mean + user_sd")
 
-## Model training
-
+# Model training
 e <- simpleError("Catch error")
 
 train_lm <- function(lm_formula, lm_data){
@@ -356,12 +368,12 @@ rm(full_fits)
 stopImplicitCluster()
 
 # Clean up before next step
-gc()
+invisible(gc())
 
 ```
 
 # Final model predictions and results
-```{r}
+```{r Linear Model Results}
 
 # Read model coeffecients and calculate RMSE
 
@@ -370,87 +382,118 @@ calculate_results <- function(model_formulas, test_ratings){
   
   for(m in 1:length(model_formulas)){
     
-    print("Current model: ")
-    print(model_formulas[[m]])
+    #print("Current model: ")
+    #print(model_formulas[[m]])
     
-    coefs <- readRDS(paste0("models/", user_formulas[[m]], ".rds"))
-    print("Coefficients read: ")
-    print(coefs)
+    coefs <- readRDS(paste0("models/", model_formulas[[m]], ".rds"))
+    #print("Coefficients read: ")
+    #print(coefs)
     
     prediction <- rep(coefs[[1]], nrow(test_ratings)) # start with the intercept
-    print("Prediction (intercept): ")
-    str(prediction)
+    #print("Prediction (intercept): ")
+    #str(prediction)
     
     for(c in 2:length(coefs)){ # then go through each coefficient
-      print("Current coefficient: ")
-      print(coefs[c])
+      #print("Current coefficient: ")
+      #print(coefs[c])
       
       ce <- rep(coefs[[c]], nrow(test_ratings))
-      str(ce)
+      #str(ce)
       
-      print(paste("Column name: ", names(coefs[c])))
-      str(test_ratings[, names(coefs[c])])
+      #print(paste("Column name: ", names(coefs[c])))
+      #str(test_ratings[, names(coefs[c])])
       
       prediction <- prediction + (ce * test_ratings[, names(coefs[c])]) # and add coef * value to prediction
       
     }
     
-    print("Final prediction: ")
-    str(prediction)
-    str(test_ratings$rating)
+    #print("Final prediction: ")
+    #str(prediction)
+    #print("Test ratings: ")
+    #str(test_ratings$rating)
     
     RMSE <- function(predicted_ratings, true_ratings){
-     sqrt(mean((true_ratings - predicted_ratings)^2))
+      #print("Calculating RMSE!")
+      #str(predicted_ratings)
+      #print(predicted_ratings[1:10])
+      #str(true_ratings)
+      #print(true_ratings[1:10])
+      
+      rmse <- sqrt(mean((true_ratings - predicted_ratings)^2, na.rm = TRUE))
+      
+      #print("RMSE!")
+      #str(rmse)
+      #print(rmse)
+      
+      rmse
     }
 
     model_rmse <- RMSE(prediction, test_ratings$rating)
+    #print(paste("Model RMSE: ", model_rmse))
     
-    print(paste(model_formulas[[m]], model_rmse))
+    #print(paste(model_formulas[[m]], model_rmse))
+    
+    results <- data.frame(model = model_formulas[m], rmse = model_rmse)
   }
-
+  
+  results
 }
 
-user_results <- calculate_results(user_formulas, test_ratings)
+user_results <- lapply(user_formulas, calculate_results, test_ratings = test_ratings)
+movie_results <- lapply(movie_formulas, calculate_results, test_ratings = test_ratings)
+combined_results <- lapply(combined_formulas, calculate_results, test_ratings = test_ratings)
+full_results <- lapply(full_formulas, calculate_results, test_ratings = test_ratings)
 
 # Save results locally and print
+saveRDS(user_results, "user_results.rds")
+saveRDS(movie_results, "movie_results.rds")
+saveRDS(combined_results, "combined_results.rds")
+saveRDS(full_results, "full_results.rds")
+
+# Lets have a look
+lm_results <- bind_rows(c(user_results, movie_results, combined_results, full_results))
+lm_results %>% arrange(rmse)
 saveRDS(lm_results, "lm_results.rds")
-print(lm_results %>% arrange(rmse))
 
 # Clean up before next step
-gc()
+invisible(gc())
 
 ```
 
 # Automatic Machine Learning with H2O.ai
-```{r}
+```{r autoML}
 
 # Shall we explore auto ML?
 
 library(h2o)
 
 h2o.init()
+h2o.no_progress()
 
 # Import a sample binary outcome train/test set into H2O
-train <- as.h2o(train_ratings)
-test <- as.h2o(test_ratings)
+train <- as.h2o(readRDS("edx.RData"))
+test <- as.h2o(readRDS("validation.RData"))
 
 # Identify predictors and response
 y <- "rating"
 x <- setdiff(names(train), y)
 
 # Run AutoML for 10 base models (limited to 1 hour max runtime by default)
+print(Sys.time())
 aml <- h2o.automl(x = x, y = y,
                   training_frame = train,
                   validation_frame = test,
                   max_models = 10,
-                  seed = 1)
+                  seed = 1,
+                  stopping_metric = "RMSE",
+                  sort_metric = "RMSE")
 
 # View the AutoML Leaderboard
 lb <- aml@leaderboard
 autoML_results <- as.data.frame(lb) %>% select(model_id, rmse)
 
 saveRDS(autoML_results, "autoML_results.rds")
-print(autoML_result)
+print(autoML_results)
       
 ```
 
