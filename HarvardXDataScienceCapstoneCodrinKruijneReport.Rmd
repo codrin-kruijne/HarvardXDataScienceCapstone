@@ -1,22 +1,23 @@
 ---
-title: "HarvardX Data Science Capstone"
+title: "Basic MovieLens Recommendation Report"
+subtitle: "HarvardX Data Science Capstone Project"
 author: "Codrin Kruijne"
-date: "30/05/2019"
+date: "`r Sys.Date()`"
 output:
   pdf_document: default
+urlcolor: blue
 ---
 
-```{r}
+```{r message=FALSE, warning=FALSE, include=FALSE}
 require(dplyr)
 ```
 
-
-This report has been prepared for the [HarvardX Data Science program] ](https://www.edx.org/professional-certificate/harvardx-data-science) Capstone course final project submission and consists of three files of original work that can be found on GitHub (with all commits): this [report in PDF](), this [report in R markdown] and an [R markdown script file]() with all the code (also [knitted to PDF with results]() for convenience). Results are read in from data objects stored locally, that were the output of the script file. Next to the course requirements my learning goal was to get familiar with parallel processing and to explore using [AutoML](http://docs.h2o.ai/h2o/latest-stable/h2o-docs/automl.html) with [H2O in R](https://cran.r-project.org/package=h2o). 
+This report has been prepared for the [HarvardX Data Science program](https://www.edx.org/professional-certificate/harvardx-data-science) Capstone course final project submission and consists of three files of original work that can be found [on GitHub](https://github.com/codrin-kruijne/HarvardXDataScienceCapstone) (with all commits): this [report in PDF](https://github.com/codrin-kruijne/HarvardXDataScienceCapstone/blob/master/HarvardXDataScienceCapstoneCodrinKruijneReport.pdf), this [report in R markdown](https://github.com/codrin-kruijne/HarvardXDataScienceCapstone/blob/master/HarvardXDataScienceCapstoneCodrinKruijneReport.Rmd) and an [R markdown script file](https://github.com/codrin-kruijne/HarvardXDataScienceCapstone/blob/master/HarvardXDataScienceCapstoneCodrinKruijneRecommendationResults.Rmd) with all the code (also [knitted to PDF with results](https://github.com/codrin-kruijne/HarvardXDataScienceCapstone/blob/master/HarvardXDataScienceCapstoneCodrinKruijneRecommendationResults.pdf) for convenience). Results are read in from data objects stored locally (also saved in the GitHub repository), that were the output of the script file. Next to the course requirements my learning goal was to get familiar with parallel processing and to explore using [AutoML](http://docs.h2o.ai/h2o/latest-stable/h2o-docs/automl.html) with [H2O in R](https://cran.r-project.org/package=h2o). 
 
 
 # Introduction
 
-The dataset consists of 10M movie ratings by users, including movie title, year and genre. The goal of the assignment was to devise a way to predict movie ratings. I generated predictions derived from user and movie characteristics, using linear regression and applying AutoML. Model performances was assessed using [RMSE](https://en.wikipedia.org/wiki/Root-mean-square_deviation). Derived models, requiring little computation, get to under 0.95 deviation from the actual ratings, the best linear model achieves below 0.85 and the ensemble models from autoML reach under an incredible 0.0003, using opaque distributed random forest models to be further investigated. Derived models may be improved by calculating genre and period statistics in future.
+The dataset consists of 10M movie ratings by users, including movie title, year and genre. The goal of the assignment was to devise a way to predict movie ratings. I generated predictions derived from user and movie characteristics, using linear regression and applying AutoML. Model performances was assessed using [RMSE](https://en.wikipedia.org/wiki/Root-mean-square_deviation). Derived models, requiring little computation, get to under 0.95 deviation from the actual ratings, the best linear model achieves below 0.85 and the ensemble models from autoML do not improve upon that. Derived models may be improved by calculating genre and period statistics in future to include as features in further refined models.
 
 # Analysis
 
@@ -27,40 +28,40 @@ Exploring infromation on recommender systems from the course and on Wikipedia, a
 Training and validation datasets were provided, totalling about 10M records, which may be a challenge to compute complex models on a desktop. The data is a combination of user (identity), movie (title, year and genre) and rating (rating on a scale of 1 to 5 and date) characteristics.
 
 ## Data preparation
-Data on all entities (user, movie and rating) were in one table. I separated the data into user, movie and rating characteristics tables. Those tables were used to calcluate some additional information like average movie rating, average user rating, etc. Movie genre information was extracted, so that it could be using as boolean variables, as well as the movie release year.
+Data on all entities (user, movie and rating) were in one table. I separated the data into user, movie and rating characteristics tables. Those tables were used to calcluate some additional information like average movie rating, average user rating, etc. Movie genre information was extracted from a compound string, so that it could be using as boolean variables, as well as the movie release year.
 
 ## Data exploration
-```{r echo = FALSE}
+```{r}
 rating_hist <- readRDS("rating_hist.rds")
-rating_hist
+plot(rating_hist)
 ```
-
+The data is not normally distributed, so there is a bias from the rating system used.
 
 ## Modeling
-As there is a lot of data an computing modelc can be quite resource intensive, we first looked at some derived approaches like predicting with average overall rating and average movie rating. This got our results (RMSE was required as evaluating measure) down to below 1. 
+As there is a lot of data an computing model can be quite resource intensive, we first looked at some derived approaches like predicting with average overall rating and average movie rating. This got our results (RMSE was required as evaluating measure) down to below 0.95. 
 
-```{r echo = FALSE}
+```{r}
 dr <- readRDS("derived_results.rds") %>% arrange(RMSE)
 knitr::kable(dr, caption = "Derived results")
 ```
 
 Then, I continued with Linear Modelling using Caret. Based on the theory that recommendation systems be based on rater and movie characteristics, we generated a number of models with original data and information calculated therefrom, which already improved results to below 0.85.
 
-```{r echo = FALSE}
+```{r}
 lmr <- readRDS("lm_results.rds")  %>% arrange(rmse)
 knitr::kable(lmr, caption = "Linear models results")
 ```
 
-Finally, I used autoML from H2O to train and combine the best performing models automatically, which does not yield improved results.
+Finally, I used autoML from H2O to train and combine the best performing models automatically, which does not yield improved results. Even running for 10 hourse did not get under 0.9.
 
-```{r echo=FALSE}
+```{r}
 amlr <- readRDS("autoML_results.rds")  %>% arrange(rmse)
-knitr::kable(amlr, caption = "AutoML results")
+knitr::kable(amlr, caption = "AutoML results in 1 hour")
 ```
 
 # Conclusion
-Basic derived models already provide predctions to about one star accuracy. Maybe calculating genre popularity and some statistics regarding years of movie and rating, we may improved simple derived models. Machine Learning, whether through linear regression or autoML, which includes various approaches, improves results considerably, but has a computation cost. The autoML results of one hour calculation are impressive and deserve further exploration.
+Basic derived models already provide predictions to less than one star accuracy. Machine Learning with linear regression improves results when both movie and rater data are used. H2O autoML, which includes various approaches, does not improve results with 10 hours of calculation. Maybe calculating genre popularity and some statistics regarding years of movie and rating, we may improve simple derived models.
 
 # References
-[Winning the Netflix Prize: A Summary](http://blog.echen.me/2011/10/24/winning-the-netflix-prize-a-summary/)
-[Wikipedia article "Recommender system"](https://en.wikipedia.org/wiki/Recommender_system)
+1. [Winning the Netflix Prize: A Summary](http://blog.echen.me/2011/10/24/winning-the-netflix-prize-a-summary/)
+2. [Wikipedia article "Recommender system"](https://en.wikipedia.org/wiki/Recommender_system)

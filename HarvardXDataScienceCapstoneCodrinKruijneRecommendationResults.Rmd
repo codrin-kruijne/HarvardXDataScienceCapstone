@@ -1,13 +1,15 @@
 ---
-title: "HarvardX Data Science Capstone Movie recommendation script"
+title: "Basic MovieLens recommendation script"
+subtitle: "HarvardX Data Science Capstone Project"
 author: "Codrin Kruijne"
-date: "30/5/2019"
+date: "`r Sys.Date()`"
 output:
   pdf_document: default
   html_notebook: default
+urlcolor: blue
 ---
 
-```{r setup}
+```{r setup, message = FALSE, warning = FALSE}
 # PLEASE NOTE
 # THIS SCRIPT HAS ONLY BEEN TESTED ON A 6-CORE (12-THREAD), 64GB MEMORY MACHINE
 # AND WILL PROBABLY NOT RUN WITH LOWER COMPUTER SPECIFICATIONS.
@@ -18,7 +20,9 @@ memory.limit()
 knitr::opts_chunk$set(
 	message = FALSE,
 	warning = FALSE,
-	cache = TRUE
+	cache = TRUE,
+	tidy.opts = list(width.cutoff = 100),
+	tidy = TRUE
 )
 script_start <- Sys.time()
 
@@ -53,7 +57,7 @@ all_data <- setNames(list(train_data, test_data), c("train_data", "test_data"))
 # Let's have a quick look at the rating training data
 rating_hist <- hist(train_data$rating)
 saveRDS(rating_hist, "rating_hist.rds")
-rating_hist
+plot(rating_hist)
 ```
 
 # Preparing data
@@ -214,12 +218,12 @@ naive_rmse <- RMSE(test_ratings$rating, train_mean)
 derived_results <- tibble(method = "Average training rating", RMSE = naive_rmse)
 
 # Model using fixed number
-fixed_number <- rep(3, nrow(test_ratings))
+fixed_number <- rep(3.5, nrow(test_ratings))
 
 fixed_rmse <- RMSE(test_ratings$rating, fixed_number)
 
 derived_results <- bind_rows(derived_results,
-                             tibble(method = "Fixed number 2.5",
+                             tibble(method = "Fixed number 3.5",
                                     RMSE = fixed_rmse ))
 
 # Derived predictions
@@ -299,7 +303,7 @@ registerDoParallel(tcl)
 invisible(clusterEvalQ(tcl, library(caret)))
 
 print(paste("Memory size before garbage collection: ", memory.size()))
-gc()
+invisible(gc())
 print(paste("Memory size after garbage collection: ", memory.size()))
 
 # Define models
@@ -348,19 +352,19 @@ train_lm <- function(lm_formula, lm_data){
 }
 
 # Train and save locally
-user_fits <- parLapply(tcl, user_formulas, train_lm, lm_data = train_ratings)
+system.time(user_fits <- parLapply(tcl, user_formulas, train_lm, lm_data = train_ratings))
 #saveRDS(user_fits, "user_fits.rds")
 rm(user_fits)
 
-movie_fits <- parLapply(tcl, movie_formulas, train_lm, lm_data = train_ratings)
+system.time(movie_fits <- parLapply(tcl, movie_formulas, train_lm, lm_data = train_ratings))
 #saveRDS(movie_fits, "movie_fits.rds")
 rm(movie_fits)
 
-combined_fits <- parLapply(tcl, combined_formulas, train_lm, lm_data = train_ratings)
+system.time(combined_fits <- parLapply(tcl, combined_formulas, train_lm, lm_data = train_ratings))
 #saveRDS(combined_fits, "combined_fits.rds")
 rm(combined_fits)
 
-full_fits <- parLapply(tcl, full_formulas, train_lm, lm_data = train_ratings)
+system.time(full_fits <- parLapply(tcl, full_formulas, train_lm, lm_data = train_ratings))
 #saveRDS(full_fits, "full_fits.rds")
 rm(full_fits)
 
@@ -382,48 +386,21 @@ calculate_results <- function(model_formulas, test_ratings){
   
   for(m in 1:length(model_formulas)){
     
-    #print("Current model: ")
-    #print(model_formulas[[m]])
-    
     coefs <- readRDS(paste0("models/", model_formulas[[m]], ".rds"))
-    #print("Coefficients read: ")
-    #print(coefs)
     
     prediction <- rep(coefs[[1]], nrow(test_ratings)) # start with the intercept
-    #print("Prediction (intercept): ")
-    #str(prediction)
     
     for(c in 2:length(coefs)){ # then go through each coefficient
-      #print("Current coefficient: ")
-      #print(coefs[c])
       
       ce <- rep(coefs[[c]], nrow(test_ratings))
-      #str(ce)
-      
-      #print(paste("Column name: ", names(coefs[c])))
-      #str(test_ratings[, names(coefs[c])])
       
       prediction <- prediction + (ce * test_ratings[, names(coefs[c])]) # and add coef * value to prediction
       
     }
     
-    #print("Final prediction: ")
-    #str(prediction)
-    #print("Test ratings: ")
-    #str(test_ratings$rating)
-    
     RMSE <- function(predicted_ratings, true_ratings){
-      #print("Calculating RMSE!")
-      #str(predicted_ratings)
-      #print(predicted_ratings[1:10])
-      #str(true_ratings)
-      #print(true_ratings[1:10])
       
       rmse <- sqrt(mean((true_ratings - predicted_ratings)^2, na.rm = TRUE))
-      
-      #print("RMSE!")
-      #str(rmse)
-      #print(rmse)
       
       rmse
     }
@@ -470,7 +447,7 @@ library(h2o)
 h2o.init()
 h2o.no_progress()
 
-# Import a sample binary outcome train/test set into H2O
+# Import train/test set into H2O
 train <- as.h2o(readRDS("edx.RData"))
 test <- as.h2o(readRDS("validation.RData"))
 
@@ -504,3 +481,40 @@ script_end <- Sys.time()
 print(paste("Total script running time: ", round(difftime(script_end, script_start, units = "mins"), 1), " minutes"))
 ```
 
+# Extended automatic Machine Learning with H2O.ai
+```{r Extended autoML, eval = FALSE}
+
+# What will 10 hours of computation yield?
+
+library(h2o)
+
+h2o.init()
+h2o.show_progress()
+
+# Import train/test set into H2O
+train <- as.h2o(readRDS("edx.RData"))
+test <- as.h2o(readRDS("validation.RData"))
+
+# Identify predictors and response
+y <- "rating"
+x <- setdiff(names(train), y)
+
+# Run AutoML for 25 models (limited to 10 hour max runtime)
+print(Sys.time())
+xaml <- h2o.automl(x = x, y = y,
+                  training_frame = train,
+                  validation_frame = test,
+                  max_models = 25,
+                  seed = 1,
+                  stopping_metric = "RMSE",
+                  sort_metric = "RMSE",
+                  max_runtime_secs = 36000)
+
+# View the AutoML Leaderboard
+xlb <- xaml@leaderboard
+xautoML_results <- as.data.frame(xlb) %>% select(model_id, rmse)
+
+saveRDS(xautoML_results, "xautoML_results.rds")
+print(xautoML_results)
+      
+```
